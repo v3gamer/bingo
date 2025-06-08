@@ -4,7 +4,7 @@ exports.query = void 0;
 var pg_1 = require("pg");
 var pool = new pg_1.Pool({
     user: 'postgres',
-    password: '1234',
+    password: 'admin',
     host: 'localhost',
     port: 5432,
     database: 'BINGO'

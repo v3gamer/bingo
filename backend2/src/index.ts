@@ -23,7 +23,7 @@ const io = new Server(server, {
 // --- INTERFACES ---
 
 interface GameRoomState {
-  numerosCantados: number[];       // números ya cantados
+  numerosCantados: number[];       // números ya cantadoss
   numerosDisponibles: number[];    // números por cantar, orden aleatorio
   numeroActual: number | null;     // número actual cantado
   juegoTerminado: boolean;

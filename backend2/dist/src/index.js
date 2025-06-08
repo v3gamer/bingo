@@ -58,35 +58,117 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.generarCarton = void 0;
 var express_1 = __importDefault(require("express"));
 var cors_1 = __importDefault(require("cors"));
+var socket_io_1 = require("socket.io");
+var http_1 = __importDefault(require("http"));
+var path_1 = __importDefault(require("path"));
+var body_parser_1 = __importDefault(require("body-parser"));
+var db = __importStar(require("./db-connection"));
 var app = express_1.default();
 app.use(cors_1.default());
-var body_parser_1 = __importDefault(require("body-parser"));
+app.use(body_parser_1.default.json());
+app.use(express_1.default.static(path_1.default.join(__dirname, 'dist/draw_board')));
 var jsonParser = body_parser_1.default.json();
-var db = __importStar(require("./db-connection"));
+var server = http_1.default.createServer(app);
+var io = new socket_io_1.Server(server, {
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST']
+    }
+});
+// --- DATOS GLOBALES ---
+var users = {};
+var gameRooms = {};
+// --- FUNCIONES AUXILIARES ---
+function generarOrdenNumeros() {
+    var _a;
+    var numeros = Array.from({ length: 90 }, function (_, i) { return i + 1; });
+    for (var i = numeros.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        _a = [numeros[j], numeros[i]], numeros[i] = _a[0], numeros[j] = _a[1];
+    }
+    return numeros;
+}
+function generarNumerosAleatorios(cantidad, min, max) {
+    var numeros = new Set();
+    while (numeros.size < cantidad) {
+        var num = Math.floor(Math.random() * (max - min + 1)) + min;
+        numeros.add(num);
+    }
+    return Array.from(numeros);
+}
+function generarCarton() {
+    var filas = 3;
+    var columnas = 9;
+    var carton = Array.from({ length: filas }, function () {
+        return Array(columnas).fill(null);
+    });
+    var columnasConNumeros = [];
+    for (var i = 0; i < columnas; i++) {
+        var min = i === 0 ? 1 : i * 10;
+        var max = i === 8 ? 90 : i * 10 + 9;
+        var cantidad = 1 + Math.floor(Math.random() * 2); // 1 o 2 números
+        columnasConNumeros[i] = generarNumerosAleatorios(cantidad, min, max).sort(function (a, b) { return a - b; });
+    }
+    for (var col = 0; col < columnas; col++) {
+        for (var n = 0; n < columnasConNumeros[col].length; n++) {
+            var intentos = 0;
+            while (intentos < 10) {
+                var fila = Math.floor(Math.random() * filas);
+                if (carton[fila][col] === null && carton[fila].filter(function (c) { return c !== null; }).length < 5) {
+                    carton[fila][col] = {
+                        numero: columnasConNumeros[col][n],
+                        tachado: false
+                    };
+                    break;
+                }
+                intentos++;
+            }
+        }
+    }
+    // Asegurar 5 números por fila
+    for (var f = 0; f < filas; f++) {
+        var fila = carton[f];
+        var _loop_1 = function () {
+            var columnasDisponibles = fila
+                .map(function (c, i) { return (c === null ? i : -1); })
+                .filter(function (i) { return i !== -1; });
+            if (!columnasDisponibles.length)
+                return "break";
+            var col = columnasDisponibles[Math.floor(Math.random() * columnasDisponibles.length)];
+            var min = col === 0 ? 1 : col * 10;
+            var max = col === 8 ? 90 : col * 10 + 9;
+            var nuevoNumero = generarNumerosAleatorios(1, min, max)[0];
+            if (!carton.some(function (row) { var _a; return ((_a = row[col]) === null || _a === void 0 ? void 0 : _a.numero) === nuevoNumero; })) {
+                fila[col] = { numero: nuevoNumero, tachado: false };
+            }
+        };
+        while (fila.filter(function (c) { return c !== null; }).length < 5) {
+            var state_1 = _loop_1();
+            if (state_1 === "break")
+                break;
+        }
+    }
+    return carton;
+}
+exports.generarCarton = generarCarton;
+// --- RUTAS HTTP ---
 app.get('/players/:id', function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
     var query, db_response, err_1;
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
-                console.log("Petici\u00F3n recibida al endpoint GET /user/:email.");
-                console.log("Par\u00E1metro recibido por URL: " + req.params.email);
+                console.log("GET /players/" + req.params.id);
                 _a.label = 1;
             case 1:
                 _a.trys.push([1, 3, , 4]);
-                query = "SELECT * FROM users WHERE id='" + req.params.email + "'";
+                query = "SELECT * FROM usuarios WHERE id='" + req.params.id + "'";
                 return [4 /*yield*/, db.query(query)];
             case 2:
                 db_response = _a.sent();
-                if (db_response.rows.length > 0) {
-                    console.log("Usuario encontrado: " + db_response.rows[0].id);
-                    res.json(db_response.rows[0]);
-                }
-                else {
-                    console.log("Usuario no encontrado.");
-                    res.json("User not found");
-                }
+                res.json(db_response.rows.length > 0 ? db_response.rows[0] : { error: 'User not found' });
                 return [3 /*break*/, 4];
             case 3:
                 err_1 = _a.sent();
@@ -102,21 +184,17 @@ app.post('/user', jsonParser, function (req, res) { return __awaiter(void 0, voi
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
-                console.log("Petici\u00F3n recibida al endpoint POST /user. \n        Body: " + JSON.stringify(req.body));
+                console.log('POST /user', req.body);
                 _a.label = 1;
             case 1:
                 _a.trys.push([1, 3, , 4]);
-                query = "INSERT INTO users \n        VALUES ('" + req.body.id + "', '" + req.body.nombre + "');";
+                query = "INSERT INTO usuarios (id, nombre_usuario, dinero)\n      VALUES ('" + req.body.id + "', '" + req.body.nombre_usuario + "', " + req.body.dinero + ")";
                 return [4 /*yield*/, db.query(query)];
             case 2:
                 db_response = _a.sent();
-                console.log(db_response);
-                if (db_response.rowCount == 1) {
-                    res.json("El registro ha sido creado correctamente.");
-                }
-                else {
-                    res.json("El registro NO ha sido creado.");
-                }
+                res.json(db_response.rowCount == 1 ?
+                    { message: 'Registro creado correctamente' } :
+                    { error: 'No se pudo crear el registro' });
                 return [3 /*break*/, 4];
             case 3:
                 err_2 = _a.sent();
@@ -127,315 +205,80 @@ app.post('/user', jsonParser, function (req, res) { return __awaiter(void 0, voi
         }
     });
 }); });
-app.get('/products', function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
-    var query, db_response, err_3;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                console.log("Petici\u00F3n recibida al endpoint GET /products");
-                _a.label = 1;
-            case 1:
-                _a.trys.push([1, 3, , 4]);
-                query = "SELECT * FROM products ORDER BY price ASC";
-                return [4 /*yield*/, db.query(query)];
-            case 2:
-                db_response = _a.sent();
-                if (db_response.rows.length > 0) {
-                    console.log("Numero de productos encontrado: " + db_response.rows.length);
-                    res.json(db_response.rows);
-                }
-                else {
-                    console.log("Producto no encontrado.");
-                    res.json("User not found");
-                }
-                return [3 /*break*/, 4];
-            case 3:
-                err_3 = _a.sent();
-                console.error(err_3);
-                res.status(500).send('Internal Server Error');
-                return [3 /*break*/, 4];
-            case 4: return [2 /*return*/];
+// --- SOCKET.IO ---
+io.on('connection', function (socket) {
+    socket.on('disconnect', function () {
+        var _a;
+        var room = socket.data.room_code;
+        var user = socket.data.username;
+        if (room && user && users[room]) {
+            users[room].delete(user);
+            if (users[room].size === 0) {
+                // limpiar sala y juego
+                delete users[room];
+                if ((_a = gameRooms[room]) === null || _a === void 0 ? void 0 : _a.intervalo)
+                    clearInterval(gameRooms[room].intervalo);
+                delete gameRooms[room];
+            }
+            else {
+                io.to(room).emit('user_list_' + room, Array.from(users[room]));
+            }
         }
     });
-}); });
-app.post('/products/buy', jsonParser, function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
-    var new_product, query, db_response, err_4;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                console.log("Petici\u00F3n recibida al endpoint POST /products/buy. \n        Body: " + JSON.stringify(req.body));
-                _a.label = 1;
-            case 1:
-                _a.trys.push([1, 3, , 4]);
-                new_product = {
-                    id_user: req.body.id_user,
-                    id_product: req.body.id_product,
-                    is_paid: false,
-                    date_bought: new Date().toISOString().split('T'[0])
-                };
-                console.log("Producto a a\u00F1adir: " + JSON.stringify(new_product));
-                query = "INSERT INTO payments (id_user,id_product,is_paid,date_bought)\n        VALUES ('" + new_product.id_user + "', " + new_product.id_product + ", " + new_product.is_paid + ", '" + new_product.date_bought + "');";
-                return [4 /*yield*/, db.query(query)];
-            case 2:
-                db_response = _a.sent();
-                if (db_response.rowCount == 1) {
-                    console.log('Producto creado');
-                    res.json("El producto ha sido creado correctamente.");
+    socket.on('join_room', function (_a) {
+        var info = _a.info;
+        var code = info.code, user_name = info.user_name;
+        socket.join(code);
+        socket.data.username = user_name;
+        socket.data.room_code = code;
+        if (!users[code])
+            users[code] = new Set();
+        users[code].add(user_name);
+        if (!gameRooms[code]) {
+            gameRooms[code] = {
+                numerosCantados: [],
+                numerosDisponibles: generarOrdenNumeros(),
+                numeroActual: null,
+                juegoTerminado: false,
+                ganador: null,
+                intervalo: undefined,
+            };
+            // Lanzar números automáticamente cada 6 segundos
+            gameRooms[code].intervalo = setInterval(function () {
+                var room = gameRooms[code];
+                if (!room)
+                    return;
+                if (room.numerosDisponibles.length === 0) {
+                    if (room.intervalo)
+                        clearInterval(room.intervalo);
+                    room.juegoTerminado = true;
+                    io.to(code).emit('game_ended', { ganador: room.ganador || null });
+                    return;
                 }
-                else {
-                    res.json("El producto NO ha sido creado.");
-                }
-                return [3 /*break*/, 4];
-            case 3:
-                err_4 = _a.sent();
-                console.error(err_4);
-                res.status(500).send('Internal Server Error');
-                return [3 /*break*/, 4];
-            case 4: return [2 /*return*/];
+                var numero = room.numerosDisponibles.shift();
+                room.numeroActual = numero;
+                room.numerosCantados.push(numero);
+                io.to(code).emit('numero_actual', {
+                    numeroActual: numero,
+                    numerosCantados: room.numerosCantados
+                });
+            }, 6000);
         }
+        io.to(code).emit('user_list_' + code, Array.from(users[code]));
     });
-}); });
-app.get('/payments/unpaid', function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
-    var query, db_response, err_5;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                console.log("Petici\u00F3n recibida al endpoint GET /payments/unpaid");
-                _a.label = 1;
-            case 1:
-                _a.trys.push([1, 3, , 4]);
-                query = "SELECT * FROM payments WHERE is_paid = false ORDER BY date_bought DESC;";
-                return [4 /*yield*/, db.query(query)];
-            case 2:
-                db_response = _a.sent();
-                if (db_response.rows.length > 0) {
-                    console.log("Productos no pagados: " + db_response.rows);
-                    res.json(db_response.rows);
-                }
-                else {
-                    console.log("Producto no encontrado.");
-                    res.json("User not found");
-                }
-                return [3 /*break*/, 4];
-            case 3:
-                err_5 = _a.sent();
-                console.error(err_5);
-                res.status(500).send('Internal Server Error');
-                return [3 /*break*/, 4];
-            case 4: return [2 /*return*/];
-        }
+    socket.on('bingo_cantado', function (_a) {
+        var roomCode = _a.roomCode, jugador = _a.jugador;
+        var room = gameRooms[roomCode];
+        if (!room || room.juegoTerminado)
+            return;
+        room.juegoTerminado = true;
+        room.ganador = jugador;
+        if (room.intervalo)
+            clearInterval(room.intervalo);
+        io.to(roomCode).emit('bingo_ganado', {
+            ganador: jugador
+        });
     });
-}); });
-app.get('/payments/paid', function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
-    var query, db_response, err_6;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                console.log("Petici\u00F3n recibida al endpoint GET /payments/paid");
-                _a.label = 1;
-            case 1:
-                _a.trys.push([1, 3, , 4]);
-                query = "SELECT * FROM payments WHERE is_paid = true ORDER BY date_paid DESC;";
-                return [4 /*yield*/, db.query(query)];
-            case 2:
-                db_response = _a.sent();
-                if (db_response.rows.length > 0) {
-                    console.log("Productos no pagados: " + db_response.rows);
-                    res.json(db_response.rows);
-                }
-                else {
-                    console.log("Producto no encontrado.");
-                    res.json("User not found");
-                }
-                return [3 /*break*/, 4];
-            case 3:
-                err_6 = _a.sent();
-                console.error(err_6);
-                res.status(500).send('Internal Server Error');
-                return [3 /*break*/, 4];
-            case 4: return [2 /*return*/];
-        }
-    });
-}); });
-app.post('/products/pay', jsonParser, function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
-    var update_product, query, db_response, err_7;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                console.log("Petici\u00F3n recibida al endpoint POST /products/buy. \n        Body: " + JSON.stringify(req.body));
-                _a.label = 1;
-            case 1:
-                _a.trys.push([1, 3, , 4]);
-                update_product = {
-                    id_user: req.body.id_user,
-                    id_product: req.body.id_product,
-                    is_paid: true,
-                    date_paid: new Date().toISOString().split('T'[0])
-                };
-                query = "UPDATE payments SET \n        is_paid =  '" + update_product.is_paid + "', date_paid = '" + update_product.date_paid + "' WHERE id = '" + req.body.id + "' AND id_user = '" + req.body.id_user + "';";
-                return [4 /*yield*/, db.query(query)];
-            case 2:
-                db_response = _a.sent();
-                if (db_response.rowCount == 1) {
-                    console.log('Producto actualizado');
-                    res.json("El producto ha sido actualizado correctamente.");
-                }
-                else {
-                    res.json("El producto NO ha sido actualizado.");
-                }
-                return [3 /*break*/, 4];
-            case 3:
-                err_7 = _a.sent();
-                console.error(err_7);
-                res.status(500).send('Internal Server Error');
-                return [3 /*break*/, 4];
-            case 4: return [2 /*return*/];
-        }
-    });
-}); });
-app.post('/alumno', jsonParser, function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
-    var new_student, query, db_response, err_8;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                console.log("Petici\u00F3n recibida al endpoint POST /alumno. \n        Body: " + JSON.stringify(req.body));
-                _a.label = 1;
-            case 1:
-                _a.trys.push([1, 3, , 4]);
-                new_student = {
-                    id: req.body.id,
-                    name: req.body.name,
-                    surname: req.body.surname,
-                    age: req.body.age,
-                    grade: req.body.grade
-                };
-                console.log("Alumno a a\u00F1adir: " + JSON.stringify(new_student));
-                query = "INSERT INTO alumnos VALUES ('" + new_student.id + "', '" + new_student.name + "', '" + new_student.surname + "', " + new_student.age + ",'" + new_student.grade + "');";
-                return [4 /*yield*/, db.query(query)];
-            case 2:
-                db_response = _a.sent();
-                if (db_response.rowCount == 1) {
-                    console.log('Alumno creado');
-                    res.json("El Alumno ha sido creado correctamente.");
-                }
-                else {
-                    res.json("El Alumno No ha sido creado.");
-                }
-                return [3 /*break*/, 4];
-            case 3:
-                err_8 = _a.sent();
-                console.error(err_8);
-                res.status(500).send('Internal Server Error');
-                return [3 /*break*/, 4];
-            case 4: return [2 /*return*/];
-        }
-    });
-}); });
-app.get('/alumnos', function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
-    var query, db_response, err_9;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                console.log("Petici\u00F3n recibida al endpoint GET /alumnos");
-                _a.label = 1;
-            case 1:
-                _a.trys.push([1, 3, , 4]);
-                query = "SELECT * FROM alumnos;";
-                return [4 /*yield*/, db.query(query)];
-            case 2:
-                db_response = _a.sent();
-                if (db_response.rows.length > 0) {
-                    console.log("Alumnos: " + db_response.rows);
-                    res.json(db_response.rows);
-                }
-                else {
-                    console.log("Alumno no encontrado.");
-                    res.json("User not found");
-                }
-                return [3 /*break*/, 4];
-            case 3:
-                err_9 = _a.sent();
-                console.error(err_9);
-                res.status(500).send('Internal Server Error');
-                return [3 /*break*/, 4];
-            case 4: return [2 /*return*/];
-        }
-    });
-}); });
-app.get('/alumno/delete/:id', function (req, res) { return __awaiter(void 0, void 0, void 0, function () {
-    var query, db_response, err_10;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                console.log("Petici\u00F3n recibida al endpoint GET /alumno/delete");
-                console.log("Par\u00E1metro recibido por URL: " + req.params.id);
-                _a.label = 1;
-            case 1:
-                _a.trys.push([1, 3, , 4]);
-                query = "DELETE FROM alumnos WHERE id='" + req.params.id + "'";
-                return [4 /*yield*/, db.query(query)];
-            case 2:
-                db_response = _a.sent();
-                if (db_response.rowCount > 0) {
-                    console.log("Alumno " + req.params.id + " eliminado: ");
-                    res.json("Alumno delete");
-                }
-                else {
-                    console.log("Alumno no eliminado.");
-                    res.json("User not found");
-                }
-                return [3 /*break*/, 4];
-            case 3:
-                err_10 = _a.sent();
-                console.error(err_10);
-                res.status(500).send('Internal Server Error');
-                return [3 /*break*/, 4];
-            case 4: return [2 /*return*/];
-        }
-    });
-}); });
-/*app.post('/perfil', jsonParser, async (req, res) => {
-    console.log(`Petición recibida al endpoint POST /perfil.
-        Body:${JSON.stringify(req.body)}`);
-    try {
-        
-        let query = `INSERT INTO alumnos (name, email, img)
-        VALUES ('${req.body.name}', '${req.body.email}', '${req.body.img}');`;
-        console.log(query);
-        let db_response = await db.query(query);
-        console.log(db_response);
-        
-        res.json(`El registro del señor/a ${req.body.nombre} ${req.body.apellidos}, con domicilio ${req.body.direccion},
-             y color de pelo ${req.body.color_pelo} ha sido creado.`);
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).send('Internal Server Error');
-    }
 });
-
-app.get('/suma/:valor1/:valor2', (req, res) => {
-    let resultado: number = 0;
-    resultado = Number(req.params.valor1) + Number(req.params.valor2);
-    console.log("resultado: " + resultado);
-    res.send(String(resultado));
-});*/
-/*app.post('/futbolistas', jsonParser, async (req, res) => {
-    console.log(`Petición recibida al endpoint POST /futbolistas.
-        Body:${JSON.stringify(req.body)}`);
-    try {
-        let query = `INSERT INTO alumnos (name, email, img)
-        VALUES ('${req.body.name}', '${req.body.email}', '${req.body.img}');`;
-        console.log(query);
-        let db_response = await db.query(query);
-        console.log(db_response);
-        res.json("Registro guardado correctamente.");
-    } catch (err) {
-        console.error(err);
-        res.status(500).send('Internal Server Error');
-    }
-});*/
 var port = process.env.PORT || 3000;
-app.listen(port, function () {
-    return console.log("App listening on PORT " + port + ".\n\n    ENDPOINTS:\n    \n     \n     ");
-});
+server.listen(port, function () { return console.log("Servidor corriendo en el puerto " + port); });
