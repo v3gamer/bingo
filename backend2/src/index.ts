@@ -23,7 +23,7 @@ const io = new Server(server, {
 // --- INTERFACES ---
 
 interface GameRoomState {
-  numerosCantados: number[];       // números ya cantadoss
+  numerosCantados: number[];       // números ya cantados
   numerosDisponibles: number[];    // números por cantar, orden aleatorio
   numeroActual: number | null;     // número actual cantado
   juegoTerminado: boolean;
@@ -118,7 +118,7 @@ app.get('/players/:id', async (req, res) => {
   try {
     let query = `SELECT * FROM usuarios WHERE id='${req.params.id}'`;
     let db_response = await db.query(query);
-    res.json(db_response.rows.length > 0 ? db_response.rows[0] : {error: 'User not found'});
+    res.json(db_response.rows.length > 0 ? db_response.rows[0] : { error: 'User not found' });
   } catch (err) {
     console.error(err);
     res.status(500).send('Internal Server Error');
@@ -131,9 +131,9 @@ app.post('/user', jsonParser, async (req, res) => {
     let query = `INSERT INTO usuarios (id, nombre_usuario, dinero)
       VALUES ('${req.body.id}', '${req.body.nombre_usuario}', ${req.body.dinero})`;
     let db_response = await db.query(query);
-    res.json(db_response.rowCount == 1 ? 
-      {message: 'Registro creado correctamente'} : 
-      {error: 'No se pudo crear el registro'});
+    res.json(db_response.rowCount == 1 ?
+      { message: 'Registro creado correctamente' } :
+      { error: 'No se pudo crear el registro' });
   } catch (err) {
     console.error(err);
     res.status(500).send('Internal Server Error');
@@ -152,7 +152,10 @@ io.on('connection', (socket) => {
       if (users[room].size === 0) {
         // limpiar sala y juego
         delete users[room];
-        if (gameRooms[room]?.intervalo) clearInterval(gameRooms[room].intervalo);
+        let intervalo = gameRooms[room]?.intervalo;
+        if (intervalo !== undefined) {
+          clearInterval(intervalo);
+        }
         delete gameRooms[room];
       } else {
         io.to(room).emit('user_list_' + room, Array.from(users[room]));
@@ -181,26 +184,26 @@ io.on('connection', (socket) => {
 
       // Lanzar números automáticamente cada 6 segundos
       gameRooms[code].intervalo = setInterval(() => {
-      let room = gameRooms[code];
-      if (!room) return;
+        let room = gameRooms[code];
+        if (!room) return;
 
-      if (room.numerosDisponibles.length === 0) {
-      if (room.intervalo) clearInterval(room.intervalo);
-      room.juegoTerminado = true;
-      io.to(code).emit('game_ended', { ganador: room.ganador || null });
-      return;
-  }
+        if (room.numerosDisponibles.length === 0) {
+          if (room.intervalo) clearInterval(room.intervalo);
+          room.juegoTerminado = true;
+          io.to(code).emit('game_ended', { ganador: room.ganador || null });
+          return;
+        }
 
-      let numero = room.numerosDisponibles.shift()!;
-      room.numeroActual = numero;
-      room.numerosCantados.push(numero);
+        let numero = room.numerosDisponibles.shift()!;
+        room.numeroActual = numero;
+        room.numerosCantados.push(numero);
 
-    io.to(code).emit('numero_actual', {
-      numeroActual: numero,
-      numerosCantados: room.numerosCantados
-  });
+        io.to(code).emit('numero_actual', {
+          numeroActual: numero,
+          numerosCantados: room.numerosCantados
+        });
 
-}, 6000);
+      }, 6000);
     }
 
     io.to(code).emit('user_list_' + code, Array.from(users[code]));
