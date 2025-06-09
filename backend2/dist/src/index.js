@@ -216,8 +216,10 @@ io.on('connection', function (socket) {
             if (users[room].size === 0) {
                 // limpiar sala y juego
                 delete users[room];
-                if ((_a = gameRooms[room]) === null || _a === void 0 ? void 0 : _a.intervalo)
-                    clearInterval(gameRooms[room].intervalo);
+                var intervalo = (_a = gameRooms[room]) === null || _a === void 0 ? void 0 : _a.intervalo;
+                if (intervalo !== undefined) {
+                    clearInterval(intervalo);
+                }
                 delete gameRooms[room];
             }
             else {
